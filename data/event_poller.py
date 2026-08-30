@@ -51,7 +51,9 @@ class EventPoller:
                     confidence_score=0.85,
                     rationale=f"Found macroeconomic catalyst in headline: {headline}"
                 )
-                self.callback(signal)
+                res = self.callback(signal)
+                if asyncio.iscoroutine(res):
+                    await res
                 break # Only trigger one signal per cycle to avoid flooding the swarm
 
     async def start(self, symbols: List[str]):

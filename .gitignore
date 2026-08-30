@@ -3,3 +3,6 @@ venv
 .claude
 AGENTS.md
 GEMINI.md
+.env
+README.md
+.venv

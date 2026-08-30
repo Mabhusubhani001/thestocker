@@ -109,6 +109,12 @@
       "skillPath": "developing-with-streamlit/SKILL.md",
       "computedHash": "128c0acf5db60266b0fb0440c4064fccb7adba0a90d07259b4adddf0e4f39c78"
     },
+    "gemini-api-dev": {
+      "source": "google-gemini/gemini-skills",
+      "sourceType": "github",
+      "skillPath": "skills/gemini-api-dev/SKILL.md",
+      "computedHash": "a9d35719dcd4c86fa9aac39f28909fc55ad6b2a50d21599ce0fdda4be97ed74e"
+    },
     "getting-started": {
       "source": "crewaiinc/skills",
       "sourceType": "github",

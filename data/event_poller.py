@@ -39,11 +39,16 @@ class EventPoller:
                 news_items = self.mock_provider.get_latest_news(symbols)
                 
         # Simple heuristic to detect a "catalyst" for now.
-        # In Phase 6, the LLM Narrative Agent will actually parse the text contextually.
         for item in news_items:
             headline = item.get("headline", "").lower()
             if any(kw in headline for kw in ["fed", "fomc", "earnings", "cpi", "rate"]):
                 logger.info(f"Catalyst detected: {headline}")
+                
+                # Check Market Clock before waking the Swarm
+                if not self.alpaca_client.is_market_open():
+                    logger.warning("Market is closed. Catalyst detected but skipping Swarm execution.")
+                    break # Skip processing triggers until the market opens
+                
                 signal = VolatilitySignal(
                     symbol=item.get("symbol", "SPY"),
                     catalyst_type="Macro",

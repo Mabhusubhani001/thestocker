@@ -39,8 +39,42 @@ with col1:
     else:
         st.info("No audit logs found. Start `main.py` and wait for a catalyst to trigger the swarm.")
 
+import sys
+from pathlib import Path
+# Add project root to sys.path to allow importing config
+sys.path.append(str(Path(__file__).parent.parent))
+
+from config.settings import settings
+from alpaca.trading.client import TradingClient
+
+def get_alpaca_account():
+    if not settings.ALPACA_API_KEY:
+        return None
+    try:
+        client = TradingClient(settings.ALPACA_API_KEY, settings.ALPACA_SECRET_KEY, paper=settings.ALPACA_PAPER)
+        return client.get_account()
+    except Exception as e:
+        st.error(f"Failed to fetch Alpaca account: {e}")
+        return None
+
+account = get_alpaca_account()
+
 with col2:
     st.subheader("Live Portfolio Metrics")
-    st.metric("Account Equity", "$100,000.00", "0.00%")
-    st.metric("Margin Utilization", "0.00%", "0.00%")
-    st.metric("Net Delta", "0.00", "Neutral")
+    
+    if account:
+        equity = float(account.equity)
+        last_equity = float(account.last_equity)
+        equity_change = equity - last_equity
+        equity_pct = (equity_change / last_equity) * 100 if last_equity else 0.0
+        
+        initial_margin = float(account.initial_margin)
+        margin_utilization = (initial_margin / equity) * 100 if equity else 0.0
+        
+        st.metric("Account Equity", f"${equity:,.2f}", f"{equity_change:,.2f} ({equity_pct:.2f}%)")
+        st.metric("Margin Utilization", f"{margin_utilization:.2f}%", None)
+    else:
+        st.metric("Account Equity", "$0.00", "0.00%")
+        st.metric("Margin Utilization", "0.00%", "0.00%")
+        
+    st.metric("Net Delta", "0.00", "Neutral (Mocked)")

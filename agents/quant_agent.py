@@ -3,12 +3,28 @@ from crewai import Agent, Task
 from crewai.tools import tool
 from agents.schemas import TradeProposal
 from strategies.iron_condor import IronCondorStrategy
+from strategies.long_straddle import LongStraddleStrategy
+from strategies.bull_put_spread import BullPutSpreadStrategy
 from features.regime import calculate_iv_rank
 
 @tool("Construct Iron Condor")
 def construct_iron_condor(symbol: str, current_price: float, iv_rank: float) -> str:
     """Constructs a delta-neutral Iron Condor strategy to capture IV crush."""
     strategy = IronCondorStrategy(symbol, current_price, iv_rank)
+    proposal = strategy.construct_proposal()
+    return proposal.model_dump_json()
+
+@tool("Construct Long Straddle")
+def construct_long_straddle(symbol: str, current_price: float, iv_rank: float) -> str:
+    """Constructs a Long Straddle strategy to capture IV expansion and large price movements."""
+    strategy = LongStraddleStrategy(symbol, current_price, iv_rank)
+    proposal = strategy.construct_proposal()
+    return proposal.model_dump_json()
+
+@tool("Construct Bull Put Spread")
+def construct_bull_put_spread(symbol: str, current_price: float, iv_rank: float) -> str:
+    """Constructs a Bull Put Spread strategy to capture a bullish move with defined risk."""
+    strategy = BullPutSpreadStrategy(symbol, current_price, iv_rank)
     proposal = strategy.construct_proposal()
     return proposal.model_dump_json()
 
@@ -19,12 +35,13 @@ class QuantAgent:
             goal="Design optimal defined-risk options structures based on the narrative catalyst and IV Rank.",
             backstory=(
                 "You are a strict, mathematically driven quant. You do not trade naked options. "
-                "If the Narrative Agent predicts IV Crush, you construct an Iron Condor to sell premium. "
-                "You rely strictly on the 'Construct Iron Condor' tool to generate the exact strikes. "
-                "You never guess strikes yourself."
+                "If the Narrative Agent predicts IV Crush (implied_volatility_bias='crush'), you construct an Iron Condor to sell premium. "
+                "If the Narrative Agent predicts IV Expansion (implied_volatility_bias='expansion'), you construct a Long Straddle to buy premium. "
+                "If the Narrative Agent predicts Neutral but bullish bias, you construct a Bull Put Spread. "
+                "You rely strictly on your tools to generate the exact strikes and proposals. You never guess strikes yourself."
             ),
             verbose=True,
-            tools=[construct_iron_condor],
+            tools=[construct_iron_condor, construct_long_straddle, construct_bull_put_spread],
             allow_delegation=False,
             llm=os.environ.get("MODEL_NAME", "gemini/gemini-3.5-flash")
         )

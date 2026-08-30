@@ -7,6 +7,7 @@ from agents.narrative_agent import NarrativeAgent
 from agents.quant_agent import QuantAgent
 from agents.critic_agent import CriticAgent
 from risk.risk_manager import RiskManager
+from data.alpaca_client import AlpacaDataClient
 from execution.mcp_client import AlpacaExecutionEngine
 from storage.audit_logger import AuditLogger
 from crewai import Crew, Process
@@ -19,11 +20,24 @@ class ThetaSwarmRunner:
         self.audit_logger = AuditLogger()
         self.execution_engine = AlpacaExecutionEngine(self.audit_logger)
         
-        # In a real setup, equity and margin would be fetched live from Alpaca Account API via MCP
+        # Fetch live equity and margin from Alpaca Account API
+        alpaca_client = AlpacaDataClient()
+        account = alpaca_client.get_account()
+        
+        if account:
+            account_equity = float(account.equity)
+            daily_start_equity = float(account.last_equity)
+            current_margin_used = float(account.initial_margin)
+        else:
+            # Fallback for local testing if API fails
+            account_equity = 100000.0
+            daily_start_equity = 100000.0
+            current_margin_used = 0.0
+
         self.risk_manager = RiskManager(
-            account_equity=100000.0,
-            daily_start_equity=100000.0,
-            current_margin_used=0.0,
+            account_equity=account_equity,
+            daily_start_equity=daily_start_equity,
+            current_margin_used=current_margin_used,
             active_positions=[]
         )
 
@@ -40,11 +54,19 @@ class ThetaSwarmRunner:
         critic = CriticAgent()
         
         # 2. Create Tasks
-        dummy_news = f"Major macroeconomic shift affecting {signal.symbol}. Highly volatile environment expected."
-        task1 = narrative.analyze_news_task(dummy_news, signal.symbol)
+        # Extract the real headline from the event poller's rationale
+        actual_news = signal.rationale.replace("Found macroeconomic catalyst in headline: ", "").strip()
+        if not actual_news:
+            actual_news = f"Major macroeconomic shift affecting {signal.symbol}. Highly volatile environment expected."
+            
+        task1 = narrative.analyze_news_task(actual_news, signal.symbol)
+        
+        # Fetch live price
+        alpaca_client = AlpacaDataClient()
+        live_price = await alpaca_client.get_current_price(signal.symbol)
         
         # Passing mock historical IVs for demonstration
-        task2 = quant.design_trade_task(signal.symbol, current_price=500.0, current_iv=0.25, historical_ivs=[0.15, 0.20, 0.30])
+        task2 = quant.design_trade_task(signal.symbol, current_price=live_price, current_iv=0.25, historical_ivs=[0.15, 0.20, 0.30])
         task2.context = [task1] # Quant relies on Narrative's output
         
         task3 = critic.evaluate_trade_task()
@@ -68,6 +90,32 @@ class ThetaSwarmRunner:
             
             # (In a fully wired production app, we extract task2.output.pydantic and task3.output.pydantic
             # and pass them directly into self.risk_manager.evaluate_proposal and self.execution_engine)
+            quant_output = task2.output.pydantic
+            critic_output = task3.output.pydantic
+            
+            if quant_output and critic_output:
+                if critic_output.is_approved:
+                    logger.info("Trade approved by Critic. Sending to Risk Manager.")
+                    
+                    logger.info("Trade approved by Critic. Fetching live option quotes for Risk Manager.")
+                    
+                    # Fetch live option snapshots for legs to pass Risk Gates 3 and 4
+                    contract_symbols = [leg.contract_symbol for leg in quant_output.legs]
+                    alpaca_client = AlpacaDataClient()
+                    live_leg_data = alpaca_client.get_option_snapshot(contract_symbols)
+                    
+                    risk_decision = self.risk_manager.evaluate_proposal(quant_output, live_leg_data)
+                    
+                    if risk_decision.is_approved:
+                        logger.info("Trade passed Risk Manager. Executing via MCP.")
+                        proposal_dict = quant_output.model_dump()
+                        decision_dict = critic_output.model_dump()
+                        await self.execution_engine.execute_proposal(proposal_dict, decision_dict, live_leg_data)
+                    else:
+                        logger.warning(f"Trade rejected by Risk Manager: {risk_decision.rejection_reason}")
+                        self.audit_logger.log_event("RISK_MANAGER_REJECTED", f"Trade rejected by Risk Manager: {risk_decision.rejection_reason}")
+                else:
+                    logger.warning(f"Trade rejected by Critic Agent: {critic_output.rejection_reason}")
             
         except Exception as e:
             self.audit_logger.log_event("SWARM_ERROR", str(e))

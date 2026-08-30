@@ -11,14 +11,22 @@ class AlpacaExecutionEngine:
     """
     def __init__(self, audit_logger: AuditLogger):
         # We spawn the official Alpaca MCP server as a local subprocess
+        import os
+        from config.settings import settings
+        
+        env = os.environ.copy()
+        env["ALPACA_API_KEY"] = settings.ALPACA_API_KEY
+        env["ALPACA_SECRET_KEY"] = settings.ALPACA_SECRET_KEY
+        env["ALPACA_PAPER_TRADE"] = str(settings.ALPACA_PAPER).lower()
+
         self.server_params = StdioServerParameters(
             command="uvx",
             args=["alpaca-mcp-server"],
-            env=None # Inherits from process env, which loads from .env
+            env=env
         )
         self.audit_logger = audit_logger
 
-    async def execute_proposal(self, proposal_dict: Dict[str, Any], decision_dict: Dict[str, Any]):
+    async def execute_proposal(self, proposal_dict: Dict[str, Any], decision_dict: Dict[str, Any], live_leg_data: list = None):
         """
         Evaluates the Critic's decision. If approved, fires JSON-RPC commands to MCP.
         """
@@ -40,23 +48,40 @@ class AlpacaExecutionEngine:
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     
-                    for leg in proposal_dict.get("legs", []):
-                        # Map our OptionsLeg schema to the Alpaca MCP 'place_option_order' schema
-                        tool_args = {
-                            "symbol": leg["contract_symbol"],
-                            "side": leg["side"],
-                            "qty": str(leg["ratio"]),
-                            "type": "market",
-                            "time_in_force": "day"
-                        }
-                        
-                        self.audit_logger.log_event("MCP_TOOL_CALL", f"Calling place_option_order: {tool_args}")
-                        
-                        # Execute the trade via MCP Server
-                        result = await session.call_tool("place_option_order", tool_args)
-                        
-                        # Log the raw JSON-RPC response from Alpaca
-                        self.audit_logger.log_event("MCP_TOOL_RESULT", f"Result: {result.content}")
-                        
+                    for i, leg in enumerate(proposal_dict.get("legs", [])):
+                        try:
+                            # Calculate Limit Price based on live quotes to avoid slippage
+                            # Use Ask for buying, Bid for selling
+                            limit_price = 1.00
+                            if live_leg_data and i < len(live_leg_data):
+                                ask = live_leg_data[i].get("ask", 1.00)
+                                bid = live_leg_data[i].get("bid", 1.00)
+                                limit_price = ask if leg["side"] == "buy" else bid
+                                
+                            # If quote is 0.0 (market closed/illiquid), mock it safely for paper trading
+                            if limit_price <= 0:
+                                limit_price = 1.00
+
+                            tool_args = {
+                                "symbol": leg["contract_symbol"],
+                                "side": leg["side"],
+                                "qty": str(leg["ratio"]),
+                                "type": "limit",
+                                "time_in_force": "day",
+                                "limit_price": str(round(limit_price, 2))
+                            }
+                            
+                            self.audit_logger.log_event("MCP_TOOL_CALL", f"Calling place_option_order for {tool_args['symbol']}")
+                            
+                            # Execute the trade via MCP Server
+                            result = await session.call_tool("place_option_order", tool_args)
+                            
+                            # Log the raw JSON-RPC response from Alpaca
+                            self.audit_logger.log_event("MCP_TOOL_RESULT", f"Result: {result.content}")
+                        except Exception as e:
+                            self.audit_logger.log_event("MCP_LEG_EXECUTION_ERROR", f"Failed on leg {leg.get('contract_symbol')}: {str(e)}")
+                            # Break out to avoid partial multi-leg fills in a real environment
+                            break
+                            
         except Exception as e:
             self.audit_logger.log_event("MCP_CONNECTION_ERROR", f"Failed to reach MCP server: {str(e)}")

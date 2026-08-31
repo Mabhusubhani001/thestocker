@@ -5,7 +5,12 @@ from config.settings import settings
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import GetOptionContractsRequest
 from alpaca.data.historical.option import OptionHistoricalDataClient
-from alpaca.data.requests import OptionSnapshotRequest
+from alpaca.data.requests import OptionSnapshotRequest, StockBarsRequest
+from alpaca.data.historical.stock import StockHistoricalDataClient
+from alpaca.data.timeframe import TimeFrame
+from features.greeks import calculate_black_scholes, calculate_implied_volatility
+import math
+import numpy as np
 
 class AlpacaDataClient:
     """
@@ -25,6 +30,10 @@ class AlpacaDataClient:
             paper=settings.ALPACA_PAPER
         )
         self.option_data_client = OptionHistoricalDataClient(
+            api_key=settings.ALPACA_API_KEY,
+            secret_key=settings.ALPACA_SECRET_KEY
+        )
+        self.stock_data_client = StockHistoricalDataClient(
             api_key=settings.ALPACA_API_KEY,
             secret_key=settings.ALPACA_SECRET_KEY
         )
@@ -52,11 +61,30 @@ class AlpacaDataClient:
             res = self.trading_client.get_option_contracts(req)
             contracts = []
             for c in res.option_contracts:
+                days_to_expiry = max(1, (c.expiration_date - date.today()).days)
+                T = days_to_expiry / 365.0
+                
+                # Calculate BS Greeks using heuristics for IV (0.25)
+                # In a real environment with live IV feeds, we would pass the actual contract IV.
+                if current_price:
+                    greeks = calculate_black_scholes(
+                        S=current_price,
+                        K=float(c.strike_price),
+                        T=T,
+                        r=0.05,
+                        sigma=0.25,
+                        option_type=c.type
+                    )
+                    delta = greeks["delta"]
+                else:
+                    delta = 0.0
+
                 contracts.append({
                     "contract_symbol": c.symbol,
                     "strike": float(c.strike_price),
                     "expiration": c.expiration_date,
-                    "option_type": c.type
+                    "option_type": c.type,
+                    "delta": delta
                 })
             return contracts
         except Exception as e:
@@ -180,3 +208,75 @@ class AlpacaDataClient:
             print(f"Error fetching option snapshots: {e}")
             # Fail closed for risk management
             return [{"bid": 0.0, "ask": 999.0, "open_interest": 0} for _ in contract_symbols]
+
+    def get_volatility_metrics(self, symbol: str, current_price: float) -> tuple[float, List[float]]:
+        """
+        Computes real-time Implied Volatility (IV) using Newton-Raphson on the ATM option,
+        and computes a 30-day Historical Volatility (HV) array proxy using daily stock returns.
+        """
+        # 1. Calculate Historical Volatility Proxy (last 30 days)
+        # Fetch 60 days of historical bars to compute 30 days of rolling 30-day volatility
+        historical_ivs = []
+        try:
+            from datetime import timedelta
+            end_dt = date.today()
+            start_dt = end_dt - timedelta(days=90)
+            
+            req = StockBarsRequest(
+                symbol_or_symbols=symbol,
+                timeframe=TimeFrame.Day,
+                start=start_dt,
+                end=end_dt,
+                feed="iex" # Free tier
+            )
+            bars = self.stock_data_client.get_stock_bars(req)
+            if symbol in bars.data:
+                closes = [b.close for b in bars.data[symbol]]
+                if len(closes) > 30:
+                    returns = [math.log(closes[i]/closes[i-1]) for i in range(1, len(closes))]
+                    # Calculate rolling 30-day annualized std dev
+                    for i in range(30, len(returns)):
+                        window = returns[i-30:i]
+                        std_dev = np.std(window, ddof=1)
+                        ann_vol = std_dev * math.sqrt(252)
+                        historical_ivs.append(round(ann_vol, 4))
+        except Exception as e:
+            print(f"Error fetching historical bars for {symbol}: {e}")
+            
+        if not historical_ivs:
+            # Ultimate fallback if free tier API fails
+            historical_ivs = [0.25] * 30
+            
+        # 2. Calculate Current Implied Volatility using Newton-Raphson
+        current_iv = historical_ivs[-1] # Fallback to latest HV
+        try:
+            chain = self.get_active_option_chain(symbol, current_price)
+            if chain:
+                # Find the ATM call expiring closest to 30 days out
+                target_date = date.today() + timedelta(days=30)
+                atm_call = min(
+                    [c for c in chain if c['option_type'] == 'call'], 
+                    key=lambda x: abs(x['strike'] - current_price) + abs((x['expiration'] - target_date).days)*10, # Weight DTE heavier
+                    default=None
+                )
+                
+                if atm_call:
+                    snap = self.get_option_snapshot([atm_call['contract_symbol']])[0]
+                    mid_price = (snap['bid'] + snap['ask']) / 2.0
+                    
+                    if mid_price > 0:
+                        T = max(1, (atm_call['expiration'] - date.today()).days) / 365.0
+                        calc_iv = calculate_implied_volatility(
+                            target_price=mid_price,
+                            S=current_price,
+                            K=atm_call['strike'],
+                            T=T,
+                            r=0.05,
+                            option_type="call"
+                        )
+                        if calc_iv > 0:
+                            current_iv = round(calc_iv, 4)
+        except Exception as e:
+            print(f"Error calculating current IV for {symbol}: {e}")
+
+        return current_iv, historical_ivs

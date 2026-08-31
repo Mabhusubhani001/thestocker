@@ -54,3 +54,45 @@ def calculate_black_scholes(
         "theta": theta,
         "vega": vega
     }
+
+def calculate_implied_volatility(
+    target_price: float, S: float, K: float, T: float, r: float, option_type: Literal["call", "put"], 
+    tol: float = 1e-5, max_iter: int = 100
+) -> float:
+    """
+    Calculates Implied Volatility (Sigma) using the Newton-Raphson root-finding method.
+    Reverse-engineers the Black-Scholes formula to find the IV that matches the market price.
+    """
+    if T <= 0 or target_price <= 0:
+        return 0.0
+
+    # Initial guess for sigma (50% volatility)
+    sigma = 0.50 
+    
+    for _ in range(max_iter):
+        bs_result = calculate_black_scholes(S, K, T, r, sigma, option_type)
+        price = bs_result["price"]
+        
+        # Vega from our function is divided by 100 (for 1% change display). 
+        # We need raw Vega (derivative of price with respect to sigma) for Newton-Raphson.
+        vega = bs_result["vega"] * 100.0
+        
+        diff = price - target_price
+        
+        if abs(diff) < tol:
+            return sigma
+            
+        if vega < 1e-4:
+            # If vega is effectively 0 (deep ITM/OTM), Newton-Raphson fails to converge.
+            # We break and return the best estimate.
+            break
+            
+        sigma = sigma - (diff / vega)
+        
+        # Prevent sigma from dropping below 0 or blowing up to infinity
+        if sigma <= 0.001:
+            sigma = 0.001
+        elif sigma > 5.0:
+            sigma = 5.0
+            
+    return sigma

@@ -15,17 +15,22 @@ class BullPutSpreadStrategy(OptionsStrategy):
         client = AlpacaDataClient()
         contracts = client.get_active_option_chain(self.symbol, self.current_price)
         
-        short_put_strike_target = round(self.current_price * 0.95, 2)
-        long_put_strike_target = round(self.current_price * 0.90, 2)
+        target_short_delta = 0.30
+        target_long_delta = 0.10
         
         short_put = None
         long_put = None
         
         if contracts:
+            from datetime import date
+            min_date = date.today() + timedelta(days=14)
+            contracts = [c for c in contracts if c['expiration'] >= min_date]
+            
+        if contracts:
             puts = [c for c in contracts if c['option_type'] == 'put']
             if puts:
-                closest_short_strike = min([p['strike'] for p in puts], key=lambda x: abs(x - short_put_strike_target))
-                closest_long_strike = min([p['strike'] for p in puts], key=lambda x: abs(x - long_put_strike_target))
+                closest_short_strike = min([p['strike'] for p in puts], key=lambda x: abs(abs(next((c['delta'] for c in puts if c['strike'] == x), 0)) - target_short_delta))
+                closest_long_strike = min([p['strike'] for p in puts], key=lambda x: abs(abs(next((c['delta'] for c in puts if c['strike'] == x), 0)) - target_long_delta))
                 
                 short_candidates = [p for p in puts if p['strike'] == closest_short_strike]
                 long_candidates = [p for p in puts if p['strike'] == closest_long_strike]
@@ -55,8 +60,8 @@ class BullPutSpreadStrategy(OptionsStrategy):
 
         if not short_put or not long_put:
             expiration = (datetime.utcnow() + timedelta(days=30)).date()
-            short_put = OptionsLeg(contract_symbol=f"{self.symbol}_SHORT_PUT", strike=short_put_strike_target, expiration=expiration, option_type="put", side="sell", ratio=1)
-            long_put = OptionsLeg(contract_symbol=f"{self.symbol}_LONG_PUT", strike=long_put_strike_target, expiration=expiration, option_type="put", side="buy", ratio=1)
+            short_put = OptionsLeg(contract_symbol=f"{self.symbol}_SHORT_PUT", strike=round(self.current_price * 0.95, 2), expiration=expiration, option_type="put", side="sell", ratio=1)
+            long_put = OptionsLeg(contract_symbol=f"{self.symbol}_LONG_PUT", strike=round(self.current_price * 0.90, 2), expiration=expiration, option_type="put", side="buy", ratio=1)
             
         legs = [long_put, short_put]
         

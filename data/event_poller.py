@@ -39,9 +39,10 @@ class EventPoller:
                 news_items = self.mock_provider.get_latest_news(symbols)
                 
         # Simple heuristic to detect a "catalyst" for now.
+        # Professional Institutional Mode: We ONLY trigger on massive macro events.
         for item in news_items:
             headline = item.get("headline", "").lower()
-            if any(kw in headline for kw in ["fed", "fomc", "earnings", "cpi", "rate"]):
+            if any(kw in headline for kw in ["fed", "fomc", "cpi", "nfp", "gdp", "inflation", "recession", "powell"]):
                 logger.info(f"Catalyst detected: {headline}")
                 
                 # Check Market Clock before waking the Swarm

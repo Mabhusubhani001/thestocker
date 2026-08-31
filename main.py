@@ -9,6 +9,8 @@ from agents.critic_agent import CriticAgent
 from risk.risk_manager import RiskManager
 from data.alpaca_client import AlpacaDataClient
 from execution.mcp_client import AlpacaExecutionEngine
+from execution.sse_listener import SSEListener
+from execution.portfolio_manager import PortfolioManager
 from storage.audit_logger import AuditLogger
 from crewai import Crew, Process
 
@@ -40,6 +42,14 @@ class ThetaSwarmRunner:
             current_margin_used=current_margin_used,
             active_positions=[]
         )
+        
+        # Start SSE listener in background
+        self.sse_listener = SSEListener()
+        self.sse_listener.start()
+        
+        # Start Portfolio Manager in background
+        self.portfolio_manager = PortfolioManager(self.audit_logger, self.execution_engine)
+        self.portfolio_manager.start()
 
     async def handle_signal(self, signal: VolatilitySignal):
         """
@@ -65,8 +75,10 @@ class ThetaSwarmRunner:
         alpaca_client = AlpacaDataClient()
         live_price = await alpaca_client.get_current_price(signal.symbol)
         
-        # Passing mock historical IVs for demonstration
-        task2 = quant.design_trade_task(signal.symbol, current_price=live_price, current_iv=0.25, historical_ivs=[0.15, 0.20, 0.30])
+        # Compute real IV metrics via Newton-Raphson and Historical Returns
+        current_iv, historical_ivs = alpaca_client.get_volatility_metrics(signal.symbol, live_price)
+        
+        task2 = quant.design_trade_task(signal.symbol, current_price=live_price, current_iv=current_iv, historical_ivs=historical_ivs)
         task2.context = [task1] # Quant relies on Narrative's output
         
         task3 = critic.evaluate_trade_task()

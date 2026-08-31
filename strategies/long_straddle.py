@@ -15,13 +15,19 @@ class LongStraddleStrategy(OptionsStrategy):
         client = AlpacaDataClient()
         contracts = client.get_active_option_chain(self.symbol, self.current_price)
         
-        atm_strike = round(self.current_price, 0)
+        target_delta = 0.50
         
         long_call = None
         long_put = None
         
         if contracts:
-            closest_strike = min([c['strike'] for c in contracts], key=lambda x: abs(x - self.current_price))
+            from datetime import date
+            min_date = date.today() + timedelta(days=14)
+            contracts = [c for c in contracts if c['expiration'] >= min_date]
+            
+        if contracts:
+            # Find the option closest to 50 delta (ATM)
+            closest_strike = min([c['strike'] for c in contracts], key=lambda x: abs(abs(next((c['delta'] for c in contracts if c['strike'] == x), 0)) - target_delta))
             
             calls = [c for c in contracts if c['strike'] == closest_strike and c['option_type'] == 'call']
             puts = [c for c in contracts if c['strike'] == closest_strike and c['option_type'] == 'put']
@@ -53,6 +59,7 @@ class LongStraddleStrategy(OptionsStrategy):
         # Fallback to synthetic if Alpaca API returns empty (e.g. no keys)
         if not long_call or not long_put:
             expiration = (datetime.utcnow() + timedelta(days=30)).date()
+            atm_strike = round(self.current_price)
             long_call = OptionsLeg(contract_symbol=f"{self.symbol}_LONG_CALL", strike=atm_strike, expiration=expiration, option_type="call", side="buy", ratio=1)
             long_put = OptionsLeg(contract_symbol=f"{self.symbol}_LONG_PUT", strike=atm_strike, expiration=expiration, option_type="put", side="buy", ratio=1)
             

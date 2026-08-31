@@ -42,6 +42,12 @@ class AlpacaExecutionEngine:
             
         self.audit_logger.log_event("TRADE_APPROVED", f"Proposal {proposal_id} approved. Firing JSON-RPC over stdio...")
         
+        # Track structure in DB for SSE listener to manage
+        symbol = proposal_dict.get("symbol", "UNKNOWN")
+        strategy_name = proposal_dict.get("strategy_name", "UNKNOWN")
+        net_credit = float(proposal_dict.get("net_credit", 0.0))
+        self.audit_logger.insert_structure(proposal_id, symbol, strategy_name, net_credit)
+
         try:
             # Connect via stdio pipes
             async with stdio_client(self.server_params) as (read, write):
@@ -71,6 +77,9 @@ class AlpacaExecutionEngine:
                                 "limit_price": str(round(limit_price, 2))
                             }
                             
+                            # Track order in DB
+                            self.audit_logger.insert_order(proposal_id, tool_args["symbol"], tool_args["side"], int(tool_args["qty"]))
+                            
                             self.audit_logger.log_event("MCP_TOOL_CALL", f"Calling place_option_order for {tool_args['symbol']}")
                             
                             # Execute the trade via MCP Server
@@ -85,3 +94,40 @@ class AlpacaExecutionEngine:
                             
         except Exception as e:
             self.audit_logger.log_event("MCP_CONNECTION_ERROR", f"Failed to reach MCP server: {str(e)}")
+
+    async def close_structure(self, proposal_id: str, orders: list):
+        """
+        Dynamically closes a structure by firing opposite orders for all its legs.
+        Used by the Portfolio Manager for Take Profit / Stop Loss.
+        """
+        self.audit_logger.log_event("STRUCTURE_CLOSE", f"Closing structure {proposal_id}...")
+        
+        try:
+            async with stdio_client(self.server_params) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    
+                    for order in orders:
+                        try:
+                            # Reverse the side
+                            close_side = "sell" if order["side"] == "buy" else "buy"
+                            
+                            tool_args = {
+                                "symbol": order["contract_symbol"],
+                                "side": close_side,
+                                "qty": str(order["qty"]),
+                                "type": "market", # Market orders for liquidations to ensure execution
+                                "time_in_force": "day"
+                            }
+                            
+                            self.audit_logger.log_event("MCP_TOOL_CALL", f"Closing leg {tool_args['symbol']} with {close_side}")
+                            result = await session.call_tool("place_option_order", tool_args)
+                            self.audit_logger.log_event("MCP_TOOL_RESULT", f"Result: {result.content}")
+                            
+                        except Exception as e:
+                            self.audit_logger.log_event("MCP_LEG_EXECUTION_ERROR", f"Failed to close leg {order['contract_symbol']}: {str(e)}")
+                            
+            self.audit_logger.update_structure_status(proposal_id, 'closed')
+            
+        except Exception as e:
+            self.audit_logger.log_event("MCP_CONNECTION_ERROR", f"Failed to reach MCP server during close: {str(e)}")

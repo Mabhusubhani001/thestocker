@@ -21,7 +21,7 @@ class AlpacaExecutionEngine:
 
         self.server_params = StdioServerParameters(
             command="uvx",
-            args=["alpaca-mcp-server"],
+            args=["--quiet", "--with", "fastmcp==3.4.7", "alpaca-mcp-server==2.3.0", "serve"],
             env=env
         )
         self.audit_logger = audit_logger

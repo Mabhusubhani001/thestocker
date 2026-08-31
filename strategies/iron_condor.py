@@ -24,7 +24,14 @@ class IronCondorStrategy(OptionsStrategy):
         if contracts:
             from datetime import date
             min_date = date.today() + timedelta(days=14)
-            contracts = [c for c in contracts if c['expiration'] >= min_date]
+            filtered_contracts = [c for c in contracts if c['expiration'] >= min_date]
+            if filtered_contracts:
+                contracts = filtered_contracts
+            else:
+                # Alpaca Paper Trading often only provides near-term weeklies (0-4 days out).
+                # Fallback to the furthest expiration available.
+                max_exp = max([c['expiration'] for c in contracts])
+                contracts = [c for c in contracts if c['expiration'] == max_exp]
             
         if contracts:
             puts = [c for c in contracts if c['option_type'] == 'put']
@@ -57,10 +64,20 @@ class IronCondorStrategy(OptionsStrategy):
 
         if not (long_put and short_put and short_call and long_call):
             expiration = (datetime.utcnow() + timedelta(days=30)).date()
-            long_put = OptionsLeg(contract_symbol=f"{self.symbol}_LONG_PUT", strike=round(self.current_price * 0.90, 2), expiration=expiration, option_type="put", side="buy", ratio=1)
-            short_put = OptionsLeg(contract_symbol=f"{self.symbol}_SHORT_PUT", strike=round(self.current_price * 0.95, 2), expiration=expiration, option_type="put", side="sell", ratio=1)
-            short_call = OptionsLeg(contract_symbol=f"{self.symbol}_SHORT_CALL", strike=round(self.current_price * 1.05, 2), expiration=expiration, option_type="call", side="sell", ratio=1)
-            long_call = OptionsLeg(contract_symbol=f"{self.symbol}_LONG_CALL", strike=round(self.current_price * 1.10, 2), expiration=expiration, option_type="call", side="buy", ratio=1)
+            lp_strike = round(self.current_price * 0.90, 2)
+            sp_strike = round(self.current_price * 0.95, 2)
+            sc_strike = round(self.current_price * 1.05, 2)
+            lc_strike = round(self.current_price * 1.10, 2)
+            
+            lp_sym = self.generate_osi_symbol(expiration, "put", lp_strike)
+            sp_sym = self.generate_osi_symbol(expiration, "put", sp_strike)
+            sc_sym = self.generate_osi_symbol(expiration, "call", sc_strike)
+            lc_sym = self.generate_osi_symbol(expiration, "call", lc_strike)
+            
+            long_put = OptionsLeg(contract_symbol=lp_sym, strike=lp_strike, expiration=expiration, option_type="put", side="buy", ratio=1)
+            short_put = OptionsLeg(contract_symbol=sp_sym, strike=sp_strike, expiration=expiration, option_type="put", side="sell", ratio=1)
+            short_call = OptionsLeg(contract_symbol=sc_sym, strike=sc_strike, expiration=expiration, option_type="call", side="sell", ratio=1)
+            long_call = OptionsLeg(contract_symbol=lc_sym, strike=lc_strike, expiration=expiration, option_type="call", side="buy", ratio=1)
             
         legs = [long_put, short_put, short_call, long_call]
         

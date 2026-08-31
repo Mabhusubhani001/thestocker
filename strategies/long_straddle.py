@@ -23,7 +23,12 @@ class LongStraddleStrategy(OptionsStrategy):
         if contracts:
             from datetime import date
             min_date = date.today() + timedelta(days=14)
-            contracts = [c for c in contracts if c['expiration'] >= min_date]
+            filtered_contracts = [c for c in contracts if c['expiration'] >= min_date]
+            if filtered_contracts:
+                contracts = filtered_contracts
+            else:
+                max_exp = max([c['expiration'] for c in contracts])
+                contracts = [c for c in contracts if c['expiration'] == max_exp]
             
         if contracts:
             # Find the option closest to 50 delta (ATM)
@@ -60,8 +65,10 @@ class LongStraddleStrategy(OptionsStrategy):
         if not long_call or not long_put:
             expiration = (datetime.utcnow() + timedelta(days=30)).date()
             atm_strike = round(self.current_price)
-            long_call = OptionsLeg(contract_symbol=f"{self.symbol}_LONG_CALL", strike=atm_strike, expiration=expiration, option_type="call", side="buy", ratio=1)
-            long_put = OptionsLeg(contract_symbol=f"{self.symbol}_LONG_PUT", strike=atm_strike, expiration=expiration, option_type="put", side="buy", ratio=1)
+            call_symbol = self.generate_osi_symbol(expiration, "call", atm_strike)
+            put_symbol = self.generate_osi_symbol(expiration, "put", atm_strike)
+            long_call = OptionsLeg(contract_symbol=call_symbol, strike=atm_strike, expiration=expiration, option_type="call", side="buy", ratio=1)
+            long_put = OptionsLeg(contract_symbol=put_symbol, strike=atm_strike, expiration=expiration, option_type="put", side="buy", ratio=1)
             
         legs = [long_put, long_call]
         

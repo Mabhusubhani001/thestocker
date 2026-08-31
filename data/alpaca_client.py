@@ -280,3 +280,58 @@ class AlpacaDataClient:
             print(f"Error calculating current IV for {symbol}: {e}")
 
         return current_iv, historical_ivs
+
+    def get_breeden_litzenberger_probabilities(self, symbol: str, current_price: float) -> str:
+        """
+        Fetches the live option chain for the nearest expiration, pulls live prices,
+        and extracts the market-implied risk-neutral probability distribution
+        using the Breeden-Litzenberger theorem.
+        """
+        try:
+            from features.probabilities import extract_risk_neutral_probabilities
+            from datetime import date
+            
+            chain = self.get_active_option_chain(symbol, current_price)
+            if not chain:
+                return "Breeden-Litzenberger Risk-Neutral Probabilities (Live Estimation):\n- Data unavailable."
+                
+            calls = [c for c in chain if c['option_type'] == 'call']
+            if not calls:
+                return "Breeden-Litzenberger Risk-Neutral Probabilities (Live Estimation):\n- Data unavailable."
+                
+            # Find the nearest expiration date
+            nearest_exp = min([c['expiration'] for c in calls])
+            
+            # Filter for nearest expiration and sort by strike
+            nearest_calls = [c for c in calls if c['expiration'] == nearest_exp]
+            nearest_calls = sorted(nearest_calls, key=lambda x: x['strike'])
+            
+            # We need at least 3 strikes for finite differences
+            if len(nearest_calls) < 3:
+                return "Breeden-Litzenberger Risk-Neutral Probabilities (Live Estimation):\n- Insufficient strikes."
+                
+            contract_symbols = [c['contract_symbol'] for c in nearest_calls]
+            strikes = [c['strike'] for c in nearest_calls]
+            
+            # Fetch live snapshots
+            snapshots = self.get_option_snapshot(contract_symbols)
+            call_prices = []
+            for snap in snapshots:
+                mid = (snap['bid'] + snap['ask']) / 2.0
+                call_prices.append(mid)
+                
+            # Extract probabilities
+            probs = extract_risk_neutral_probabilities(strikes, call_prices)
+            
+            context = "Breeden-Litzenberger Risk-Neutral Probabilities (Live Estimation):\n"
+            for k, p in probs.items():
+                if p > 0.01: # Only show strikes with > 1% probability to keep prompt clean
+                    context += f"- Strike ${k:.2f}: {p * 100:.1f}%\n"
+                    
+            if context == "Breeden-Litzenberger Risk-Neutral Probabilities (Live Estimation):\n":
+                return context + "- Probabilities negligible."
+                
+            return context
+        except Exception as e:
+            print(f"Error calculating Breeden-Litzenberger probabilities: {e}")
+            return "Breeden-Litzenberger Risk-Neutral Probabilities (Live Estimation):\n- Error in calculation."

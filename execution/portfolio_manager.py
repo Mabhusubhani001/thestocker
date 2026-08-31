@@ -5,6 +5,14 @@ import threading
 from storage.audit_logger import AuditLogger
 from data.alpaca_client import AlpacaDataClient
 from execution.mcp_client import AlpacaExecutionEngine
+import threading
+
+def trigger_autopsy(proposal_id):
+    try:
+        from agents.autopsy_agent import run_autopsy
+        run_autopsy(proposal_id)
+    except Exception as e:
+        logger.error(f"Failed to run autopsy for {proposal_id}: {e}")
 
 logger = logging.getLogger(__name__)
 
@@ -121,11 +129,13 @@ class PortfolioManager:
                 if current_mtm <= (initial_credit * -2.0):
                     logger.warning(f"[GATE 9: STOP LOSS] {proposal_id} MTM is {current_mtm}. Initial credit was {initial_credit}. Liquidating.")
                     await self.execution_engine.close_structure(proposal_id, orders)
+                    threading.Thread(target=trigger_autopsy, args=(proposal_id,)).start()
                     
                 # Take Profit (Gate 8): If it costs 50% of the credit to close
                 elif current_mtm >= (initial_credit * -0.5):
                     logger.info(f"[GATE 8: TAKE PROFIT] {proposal_id} MTM is {current_mtm}. Initial credit was {initial_credit}. Taking profit.")
                     await self.execution_engine.close_structure(proposal_id, orders)
+                    threading.Thread(target=trigger_autopsy, args=(proposal_id,)).start()
             else:
                 # Debit Strategy (e.g. Long Straddle)
                 initial_cost = abs(initial_credit)
@@ -133,8 +143,10 @@ class PortfolioManager:
                 if current_mtm <= (initial_cost * 0.5):
                     logger.warning(f"[GATE 9: STOP LOSS] {proposal_id} MTM is {current_mtm}. Initial cost was {initial_cost}. Liquidating.")
                     await self.execution_engine.close_structure(proposal_id, orders)
+                    threading.Thread(target=trigger_autopsy, args=(proposal_id,)).start()
                     
                 # Take Profit (Gate 8): If the value of the long options increases by 50%
                 elif current_mtm >= (initial_cost * 1.5):
                     logger.info(f"[GATE 8: TAKE PROFIT] {proposal_id} MTM is {current_mtm}. Initial cost was {initial_cost}. Taking profit.")
                     await self.execution_engine.close_structure(proposal_id, orders)
+                    threading.Thread(target=trigger_autopsy, args=(proposal_id,)).start()

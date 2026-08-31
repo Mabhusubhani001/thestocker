@@ -24,7 +24,12 @@ class BullPutSpreadStrategy(OptionsStrategy):
         if contracts:
             from datetime import date
             min_date = date.today() + timedelta(days=14)
-            contracts = [c for c in contracts if c['expiration'] >= min_date]
+            filtered_contracts = [c for c in contracts if c['expiration'] >= min_date]
+            if filtered_contracts:
+                contracts = filtered_contracts
+            else:
+                max_exp = max([c['expiration'] for c in contracts])
+                contracts = [c for c in contracts if c['expiration'] == max_exp]
             
         if contracts:
             puts = [c for c in contracts if c['option_type'] == 'put']
@@ -60,8 +65,12 @@ class BullPutSpreadStrategy(OptionsStrategy):
 
         if not short_put or not long_put:
             expiration = (datetime.utcnow() + timedelta(days=30)).date()
-            short_put = OptionsLeg(contract_symbol=f"{self.symbol}_SHORT_PUT", strike=round(self.current_price * 0.95, 2), expiration=expiration, option_type="put", side="sell", ratio=1)
-            long_put = OptionsLeg(contract_symbol=f"{self.symbol}_LONG_PUT", strike=round(self.current_price * 0.90, 2), expiration=expiration, option_type="put", side="buy", ratio=1)
+            short_strike = round(self.current_price * 0.95, 2)
+            long_strike = round(self.current_price * 0.90, 2)
+            short_symbol = self.generate_osi_symbol(expiration, "put", short_strike)
+            long_symbol = self.generate_osi_symbol(expiration, "put", long_strike)
+            short_put = OptionsLeg(contract_symbol=short_symbol, strike=short_strike, expiration=expiration, option_type="put", side="sell", ratio=1)
+            long_put = OptionsLeg(contract_symbol=long_symbol, strike=long_strike, expiration=expiration, option_type="put", side="buy", ratio=1)
             
         legs = [long_put, short_put]
         

@@ -128,6 +128,14 @@ class ThetaSwarmRunner:
                         self.audit_logger.log_event("RISK_MANAGER_REJECTED", f"Trade rejected by Risk Manager: {risk_decision.rejection_reason}")
                 else:
                     logger.warning(f"Trade rejected by Critic Agent: {critic_output.rejection_reason}")
+                    self.audit_logger.log_rejected_proposal(
+                        proposal_id=quant_output.proposal_id,
+                        symbol=quant_output.symbol,
+                        strategy_name=quant_output.strategy_name,
+                        rejection_reason=critic_output.rejection_reason,
+                        initial_credit=quant_output.net_credit,
+                        legs=[leg.model_dump() for leg in quant_output.legs]
+                    )
             
         except Exception as e:
             self.audit_logger.log_event("SWARM_ERROR", str(e))

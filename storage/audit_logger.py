@@ -51,6 +51,38 @@ class AuditLogger:
                     FOREIGN KEY(proposal_id) REFERENCES structures(proposal_id)
                 )
             """)
+            
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS rejected_proposals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    proposal_id TEXT UNIQUE NOT NULL,
+                    symbol TEXT NOT NULL,
+                    strategy_name TEXT NOT NULL,
+                    rejection_reason TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    initial_credit REAL NOT NULL
+                )
+            """)
+            
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS rejected_legs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    proposal_id TEXT NOT NULL,
+                    contract_symbol TEXT NOT NULL,
+                    side TEXT NOT NULL,
+                    qty INTEGER NOT NULL,
+                    FOREIGN KEY(proposal_id) REFERENCES rejected_proposals(proposal_id)
+                )
+            """)
+            
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS trade_autopsies (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    proposal_id TEXT UNIQUE NOT NULL,
+                    report_markdown TEXT NOT NULL,
+                    timestamp TEXT NOT NULL
+                )
+            """)
 
     def log_event(self, event_type: str, details: str):
         """Records an event to the immutable audit ledger."""
@@ -104,4 +136,44 @@ class AuditLogger:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("SELECT * FROM orders WHERE proposal_id = ?", (proposal_id,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def log_rejected_proposal(self, proposal_id: str, symbol: str, strategy_name: str, rejection_reason: str, initial_credit: float, legs: list):
+        """Logs a rejected trade proposal into the Shadow Book."""
+        timestamp = datetime.utcnow().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO rejected_proposals (proposal_id, symbol, strategy_name, rejection_reason, timestamp, initial_credit) VALUES (?, ?, ?, ?, ?, ?)",
+                (proposal_id, symbol, strategy_name, rejection_reason, timestamp, initial_credit)
+            )
+            for leg in legs:
+                conn.execute(
+                    "INSERT INTO rejected_legs (proposal_id, contract_symbol, side, qty) VALUES (?, ?, ?, ?)",
+                    (proposal_id, leg["contract_symbol"], leg["side"], leg["qty"])
+                )
+
+    def get_rejected_proposals(self):
+        """Returns all rejected proposals for the Shadow Book UI."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute("SELECT * FROM rejected_proposals")
+            proposals = [dict(row) for row in cursor.fetchall()]
+            for p in proposals:
+                cursor = conn.execute("SELECT * FROM rejected_legs WHERE proposal_id = ?", (p['proposal_id'],))
+                p['legs'] = [dict(row) for row in cursor.fetchall()]
+            return proposals
+
+    def log_autopsy(self, proposal_id: str, report_markdown: str):
+        """Saves a trade autopsy report from the Autopsy Agent."""
+        timestamp = datetime.utcnow().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO trade_autopsies (proposal_id, report_markdown, timestamp) VALUES (?, ?, ?)",
+                (proposal_id, report_markdown, timestamp)
+            )
+            
+    def get_autopsies(self):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute("SELECT * FROM trade_autopsies")
             return [dict(row) for row in cursor.fetchall()]

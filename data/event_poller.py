@@ -19,6 +19,7 @@ class EventPoller:
         self.is_running = False
         self.alpaca_client = AlpacaDataClient()
         self.mock_provider = MockDataProvider()
+        self.processed_news_ids = set()
         
     async def _poll_cycle(self, symbols: List[str]):
         """Single polling execution."""
@@ -41,9 +42,16 @@ class EventPoller:
         # Simple heuristic to detect a "catalyst" for now.
         # Professional Institutional Mode: We ONLY trigger on massive macro events.
         for item in news_items:
+            # Generate a unique ID for the news item (Alpaca news usually has an 'id' field, fallback to headline)
+            news_id = item.get("id", item.get("headline", ""))
+            
+            if news_id in self.processed_news_ids:
+                continue # Skip deduplication
+                
             headline = item.get("headline", "").lower()
             if any(kw in headline for kw in ["fed", "fomc", "cpi", "nfp", "gdp", "inflation", "recession", "powell"]):
                 logger.info(f"Catalyst detected: {headline}")
+                self.processed_news_ids.add(news_id) # Mark as processed
                 
                 # Check Market Clock before waking the Swarm
                 if not self.alpaca_client.is_market_open():

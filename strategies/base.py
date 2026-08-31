@@ -24,6 +24,15 @@ class OptionsStrategy(ABC):
     def _generate_id(self) -> str:
         """Generates a unique proposal ID."""
         return f"PROPOSAL-{uuid.uuid4().hex[:8].upper()}"
+        
+    def generate_osi_symbol(self, expiration_date, option_type: str, strike: float) -> str:
+        """Generates a valid OSI symbol string matching ^[A-Z]{1,5}\d{6,7}[CP]\d{8}$"""
+        root = self.symbol.upper()
+        exp_str = expiration_date.strftime("%y%m%d")
+        opt_type = 'C' if option_type.lower() == 'call' else 'P'
+        strike_int = int(round(strike * 1000))
+        strike_str = f"{strike_int:08d}"
+        return f"{root}{exp_str}{opt_type}{strike_str}"
 
     def calculate_live_metrics(self, legs: List[OptionsLeg], strategy_type: str = "credit") -> Tuple[float, float, float]:
         """

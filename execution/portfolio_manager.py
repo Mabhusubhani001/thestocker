@@ -89,10 +89,10 @@ class PortfolioManager:
             contract_symbols = [o["contract_symbol"] for o in orders]
             
             # 2. Reconciliation Check:
-            # If the structure is active in our DB, but NONE of its contract symbols are in Alpaca's open positions,
-            # it means the user manually closed them on the UI (or they expired).
-            if open_symbols and not any(sym in open_symbols for sym in contract_symbols):
-                logger.info(f"Reconciliation: Structure {proposal_id} is not in Alpaca positions. Marking as closed.")
+            # If the structure is active in our DB, but ANY of its contract symbols are missing from Alpaca's open positions,
+            # it means the user manually closed part or all of it on the UI. The AI should relinquish control.
+            if open_symbols and any(sym not in open_symbols for sym in contract_symbols):
+                logger.info(f"Reconciliation: Structure {proposal_id} was manually modified by user. Relinquishing AI control.")
                 self.db.update_structure_status(proposal_id, 'closed')
                 for o in orders:
                     self.db.update_order_fill(o["contract_symbol"], o["side"], o["qty"], 0.0, 'closed')
@@ -131,8 +131,8 @@ class PortfolioManager:
                     await self.execution_engine.close_structure(proposal_id, orders)
                     threading.Thread(target=trigger_autopsy, args=(proposal_id,)).start()
                     
-                # Take Profit (Gate 8): If it costs 50% of the credit to close
-                elif current_mtm >= (initial_credit * -0.5):
+                # Take Profit (Gate 8): If it costs 80% of the credit to close (we keep 20% profit)
+                elif current_mtm >= (initial_credit * -0.8):
                     logger.info(f"[GATE 8: TAKE PROFIT] {proposal_id} MTM is {current_mtm}. Initial credit was {initial_credit}. Taking profit.")
                     await self.execution_engine.close_structure(proposal_id, orders)
                     threading.Thread(target=trigger_autopsy, args=(proposal_id,)).start()
@@ -145,8 +145,8 @@ class PortfolioManager:
                     await self.execution_engine.close_structure(proposal_id, orders)
                     threading.Thread(target=trigger_autopsy, args=(proposal_id,)).start()
                     
-                # Take Profit (Gate 8): If the value of the long options increases by 50%
-                elif current_mtm >= (initial_cost * 1.5):
+                # Take Profit (Gate 8): If the value of the long options increases by 20%
+                elif current_mtm >= (initial_cost * 1.2):
                     logger.info(f"[GATE 8: TAKE PROFIT] {proposal_id} MTM is {current_mtm}. Initial cost was {initial_cost}. Taking profit.")
                     await self.execution_engine.close_structure(proposal_id, orders)
                     threading.Thread(target=trigger_autopsy, args=(proposal_id,)).start()

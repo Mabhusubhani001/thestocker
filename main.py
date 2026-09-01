@@ -116,6 +116,10 @@ class ThetaSwarmRunner:
                     alpaca_client = AlpacaDataClient()
                     live_leg_data = alpaca_client.get_option_snapshot(contract_symbols)
                     
+                    # Fetch live active positions so Risk Manager can apply Gate 6 (Max 1 structure per ticker)
+                    active_structs = self.audit_logger.get_active_structures()
+                    self.risk_manager.active_positions = [s["symbol"] for s in active_structs]
+                    
                     risk_decision = self.risk_manager.evaluate_proposal(quant_output, live_leg_data)
                     
                     if risk_decision.is_approved:

@@ -187,22 +187,26 @@ class AlpacaDataClient:
             return [{"bid": 1.00, "ask": 1.05, "open_interest": 500} for _ in contract_symbols]
 
         try:
-            req = OptionSnapshotRequest(symbol_or_symbols=contract_symbols)
-            snapshots = self.option_data_client.get_option_snapshot(req)
-            
             result = []
-            for symbol in contract_symbols:
-                snap = snapshots.get(symbol)
-                if snap:
-                    # Some data may be missing if the option hasn't traded
-                    bid = snap.latest_quote.bid_price if snap.latest_quote else 0.0
-                    ask = snap.latest_quote.ask_price if snap.latest_quote else 0.0
-                    oi = 500 # Defaulting OI if not natively available in snapshot easily, or use snap.implied_volatility if available
-                    result.append({"bid": bid, "ask": ask, "open_interest": oi})
-                else:
-                    # Option exists but no snapshot data available (e.g., illiquid)
-                    result.append({"bid": 0.0, "ask": 999.0, "open_interest": 0})
-                    
+            chunk_size = 100
+            
+            for i in range(0, len(contract_symbols), chunk_size):
+                chunk = contract_symbols[i:i + chunk_size]
+                req = OptionSnapshotRequest(symbol_or_symbols=chunk)
+                snapshots = self.option_data_client.get_option_snapshot(req)
+                
+                for symbol in chunk:
+                    snap = snapshots.get(symbol)
+                    if snap:
+                        # Some data may be missing if the option hasn't traded
+                        bid = snap.latest_quote.bid_price if snap.latest_quote else 0.0
+                        ask = snap.latest_quote.ask_price if snap.latest_quote else 0.0
+                        oi = 500 # Defaulting OI if not natively available in snapshot easily, or use snap.implied_volatility if available
+                        result.append({"bid": bid, "ask": ask, "open_interest": oi})
+                    else:
+                        # Option exists but no snapshot data available (e.g., illiquid)
+                        result.append({"bid": 0.0, "ask": 999.0, "open_interest": 0})
+                        
             return result
         except Exception as e:
             print(f"Error fetching option snapshots: {e}")

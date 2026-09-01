@@ -149,7 +149,7 @@ class AuditLogger:
             for leg in legs:
                 conn.execute(
                     "INSERT INTO rejected_legs (proposal_id, contract_symbol, side, qty) VALUES (?, ?, ?, ?)",
-                    (proposal_id, leg["contract_symbol"], leg["side"], leg["qty"])
+                    (proposal_id, leg["contract_symbol"], leg["side"], leg["ratio"])
                 )
 
     def get_rejected_proposals(self):

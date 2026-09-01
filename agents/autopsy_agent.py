@@ -42,8 +42,20 @@ def run_autopsy(proposal_id: str):
     net_cashflow = total_credit - total_debit
     
     # Fetch current news for context on what happened
+    import asyncio
     alpaca_client = AlpacaDataClient()
-    news = alpaca_client.get_latest_news([symbol], limit=3)
+    try:
+        # Check if an event loop is already running
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # If running in a thread with a loop, this shouldn't happen based on portfolio_manager's threading,
+            # but to be safe, we can use a new loop if needed or just use run_until_complete
+            news = loop.run_until_complete(alpaca_client.get_latest_news([symbol], limit=3))
+        else:
+            news = loop.run_until_complete(alpaca_client.get_latest_news([symbol], limit=3))
+    except RuntimeError:
+        news = asyncio.run(alpaca_client.get_latest_news([symbol], limit=3))
+        
     news_headlines = [n.get("headline", "") for n in news]
     
     trade_summary = f"""
@@ -53,11 +65,13 @@ def run_autopsy(proposal_id: str):
     Total Net Cashflow (P&L): {net_cashflow:.2f}
     """
     
+    import os
     autopsy_agent = Agent(
         role="Quantitative Post-Mortem Analyst",
         goal="Analyze closed options trades and generate insightful post-mortem reports explaining why they won or lost.",
         backstory="You are an expert options trader and quantitative researcher. Your job is to analyze the final P&L of a trade against recent news events, providing clear, actionable insights into what the market did and why the trade resulted in profit or loss.",
-        verbose=True
+        verbose=True,
+        llm=os.environ.get("MODEL_NAME", "gemini/gemini-3.5-flash")
     )
     
     autopsy_task = Task(

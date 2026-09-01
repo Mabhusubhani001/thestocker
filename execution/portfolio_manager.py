@@ -2,10 +2,12 @@ import time
 import logging
 import asyncio
 import threading
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from storage.audit_logger import AuditLogger
 from data.alpaca_client import AlpacaDataClient
 from execution.mcp_client import AlpacaExecutionEngine
-import threading
+from config.settings import settings
 
 def trigger_autopsy(proposal_id):
     try:
@@ -65,10 +67,21 @@ class PortfolioManager:
     async def _check_positions(self):
         structures = self.db.get_active_structures()
         
+        # Check Gate 10 (Thursday EOD Liquidation) time
+        tz = ZoneInfo(settings.LIQUIDATION_TIMEZONE)
+        now_et = datetime.now(tz)
+        is_liquidation_time = False
+        if now_et.weekday() == settings.LIQUIDATION_DAY_OF_WEEK:
+            if now_et.hour > settings.LIQUIDATION_HOUR or \
+               (now_et.hour == settings.LIQUIDATION_HOUR and now_et.minute >= settings.LIQUIDATION_MINUTE):
+                is_liquidation_time = True
+        
         # 1. Fetch live open positions from Alpaca for Reconciliation
+        positions_fetched = False
         try:
             positions = self.data_client.trading_client.get_all_positions()
             open_symbols = {p.symbol for p in positions}
+            positions_fetched = True
         except Exception as e:
             logger.error(f"Error fetching positions for reconciliation: {e}")
             open_symbols = set()
@@ -91,22 +104,34 @@ class PortfolioManager:
             # 2. Reconciliation Check:
             # If the structure is active in our DB, but ANY of its contract symbols are missing from Alpaca's open positions,
             # it means the user manually closed part or all of it on the UI. The AI should relinquish control.
-            if open_symbols and any(sym not in open_symbols for sym in contract_symbols):
+            if positions_fetched and any(sym not in open_symbols for sym in contract_symbols):
                 logger.info(f"Reconciliation: Structure {proposal_id} was manually modified by user. Relinquishing AI control.")
                 self.db.update_structure_status(proposal_id, 'closed')
                 for o in orders:
                     self.db.update_order_fill(o["contract_symbol"], o["side"], o["qty"], 0.0, 'closed')
                 continue
+                
+            # Gate 10: Active Liquidation
+            if is_liquidation_time:
+                logger.warning(f"[GATE 10: EOD LIQUIDATION] Liquidating {proposal_id} before weekend.")
+                await self.execution_engine.close_structure(proposal_id, orders)
+                threading.Thread(target=trigger_autopsy, args=(proposal_id,)).start()
+                continue
             
             # Fetch live snapshots
             snapshots = self.data_client.get_option_snapshot(contract_symbols)
             
+            valid_quotes = True
             current_mtm = 0.0
             for i, order in enumerate(orders):
                 quote = snapshots[i]
                 ask = quote.get("ask", 0.0)
                 bid = quote.get("bid", 0.0)
                 qty = order["qty"]
+                
+                if ask <= 0.0 or bid <= 0.0:
+                    valid_quotes = False
+                    break
                 
                 # To close a short position, we buy at the ask. 
                 # To close a long position, we sell at the bid.
@@ -115,6 +140,10 @@ class PortfolioManager:
                     current_mtm -= (ask * qty)
                 else:
                     current_mtm += (bid * qty)
+                    
+            if not valid_quotes:
+                logger.info(f"Skipping MTM evaluation for {proposal_id} due to zero-quotes (illiquid/halted).")
+                continue
                     
             # For a credit strategy (Iron Condor, Credit Spread):
             # We collected `initial_credit`. 

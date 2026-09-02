@@ -16,7 +16,7 @@ We believe a 2-day contest window proves nothing about real AI profitability; th
 
 | Asset | Link |
 | :--- | :--- |
-| **Submission Pitch Deck** | [presentation.md](./ThetaSwarm-Autonomous-Options-Alpha-Desk (1).pdf) |
+| **Submission Pitch Deck** | [presentation.md](./presentation.md) |
 | **Project Narrative & Architecture** | [project_description.md](./project_description.md) |
 | **Predictive Alpha Backtest Results** | [RESULTS_LIVE_SWARM.md](./RESULTS_LIVE_SWARM.md) |
 | **Full Repo Audit** | [repo_audit_report.md](./repo_audit_report.md) |

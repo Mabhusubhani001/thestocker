@@ -1,6 +1,2 @@
 venv
-.agents
-.claude
-AGENTS.md
-GEMINI.md
 .env

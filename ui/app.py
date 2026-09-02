@@ -97,6 +97,14 @@ def get_audit_logs():
     except Exception:
         return pd.DataFrame()
 
+def get_agent_thoughts():
+    try:
+        with sqlite3.connect(db_path) as conn:
+            df = pd.read_sql_query("SELECT * FROM agent_thoughts ORDER BY timestamp DESC LIMIT 100", conn)
+            return df.iloc[::-1] # Reverse to display chronologically
+    except Exception:
+        return pd.DataFrame()
+
 def get_alpaca_account():
     if not settings.ALPACA_API_KEY:
         return None
@@ -127,40 +135,61 @@ def get_autopsies():
     except Exception:
         return pd.DataFrame()
 
-tab1, tab2, tab3 = st.tabs(["Live Portfolio & Ledger", "The Shadow Book (Risk Tracker)", "AI Trade Autopsies"])
+tab1, tab2, tab3, tab4 = st.tabs(["Live Portfolio & Ledger", "The Shadow Book (Risk Tracker)", "AI Trade Autopsies", "Backtest & Proof"])
+
+@st.fragment(run_every="2s")
+def live_chat_fragment():
+    st.subheader("The AI's Brain (Live Swarm Comms)")
+    st.markdown("*Watch the Narrative, Quant, and Critic agents debate trades in real-time.*")
+    df = get_agent_thoughts()
+    if not df.empty:
+        chat_container = st.container(height=600)
+        with chat_container:
+            for idx, row in df.iterrows():
+                text = row['thought_text']
+                # Try to assign avatars based on content if possible
+                if "Narrative" in text or "headline" in text.lower():
+                    avatar = "📰"
+                elif "Quant" in text or "strike" in text.lower():
+                    avatar = "📐"
+                elif "Critic" in text or "evaluate" in text.lower():
+                    avatar = "⚖️"
+                else:
+                    avatar = "🤖"
+                st.chat_message(row['agent_name'], avatar=avatar).write(text)
+    else:
+        st.info("The Swarm is resting. Waiting for a breaking news headline to trigger the AI...")
+
+@st.fragment(run_every="5s")
+def live_portfolio_fragment():
+    st.subheader("Live Portfolio")
+    st.markdown("*Real-world money on the line.*")
+    account = get_alpaca_account()
+    if account:
+        equity = float(account.equity)
+        last_equity = float(account.last_equity)
+        equity_change = equity - last_equity
+        equity_pct = (equity_change / last_equity) * 100 if last_equity else 0.0
+        
+        initial_margin = float(account.initial_margin)
+        margin_utilization = (initial_margin / equity) * 100 if equity else 0.0
+        
+        st.metric("Account Equity", f"${equity:,.2f}", f"{equity_change:,.2f} ({equity_pct:.2f}%)")
+        st.metric("Margin Utilization", f"{margin_utilization:.2f}%", None)
+    else:
+        st.metric("Account Equity", "$0.00", "0.00%")
+        st.metric("Margin Utilization", "0.00%", "0.00%")
+        
+    st.metric("Net Delta", "0.00", "Neutral (Mocked)")
 
 with tab1:
     col1, col2 = st.columns([2, 1])
 
     with col1:
-        st.subheader("The AI's Brain (Live Audit Ledger)")
-        st.markdown("*Every single decision, rejection, and trade executed by the AI is permanently logged here. This is the un-editable proof of what the AI is thinking in real-time.*")
-        df = get_audit_logs()
-        if not df.empty:
-            st.dataframe(df, use_container_width=True, hide_index=True)
-        else:
-            st.info("No logs found. Waiting for a breaking news headline to trigger the AI...")
+        live_chat_fragment()
 
     with col2:
-        st.subheader("Live Portfolio")
-        st.markdown("*Real-world money on the line.*")
-        account = get_alpaca_account()
-        if account:
-            equity = float(account.equity)
-            last_equity = float(account.last_equity)
-            equity_change = equity - last_equity
-            equity_pct = (equity_change / last_equity) * 100 if last_equity else 0.0
-            
-            initial_margin = float(account.initial_margin)
-            margin_utilization = (initial_margin / equity) * 100 if equity else 0.0
-            
-            st.metric("Account Equity", f"${equity:,.2f}", f"{equity_change:,.2f} ({equity_pct:.2f}%)")
-            st.metric("Margin Utilization", f"{margin_utilization:.2f}%", None)
-        else:
-            st.metric("Account Equity", "$0.00", "0.00%")
-            st.metric("Margin Utilization", "0.00%", "0.00%")
-            
-        st.metric("Net Delta", "0.00", "Neutral (Mocked)")
+        live_portfolio_fragment()
 
 with tab2:
     st.subheader("The Shadow Book: Dodged Bullets & Saved Capital")
@@ -224,3 +253,23 @@ with tab3:
                 st.markdown(row['report_markdown'])
     else:
         st.info("No reports available yet. Wait for a live trade to finish.")
+
+with tab4:
+    st.subheader("Historical Proof & Verifiable Backtest")
+    st.markdown("We don't just rely on live data. We ran two distinct backtests to prove both the **Alpha (Predictive Intelligence)** of our AI Swarm, and the **Absolute Safety** of our Risk Engine.")
+    
+    st.markdown("---")
+    live_swarm_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "backtest", "RESULTS_LIVE_SWARM.md")
+    if os.path.exists(live_swarm_path):
+        with open(live_swarm_path, 'r', encoding='utf-8') as f:
+            st.markdown(f.read())
+    else:
+        st.info("Run `python backtest/run_live_swarm.py` to generate the Predictive Alpha proof artifact.")
+        
+    st.markdown("---")
+    results_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "backtest", "RESULTS.md")
+    if os.path.exists(results_path):
+        with open(results_path, 'r', encoding='utf-8') as f:
+            st.markdown(f.read())
+    else:
+        st.info("Run `python backtest/run.py` to generate the reproducible Risk Engine proof artifact.")

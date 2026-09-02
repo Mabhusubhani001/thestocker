@@ -45,7 +45,7 @@ class QuantAgent:
             verbose=True,
             tools=[construct_iron_condor, construct_long_straddle, construct_bull_put_spread],
             allow_delegation=False,
-            llm=os.environ.get("MODEL_NAME", "gemini/gemini-3.5-flash")
+            llm=os.environ.get("MODEL_NAME", "openai/Qwen/Qwen2.5-7B-Instruct")
         )
         
     def design_trade_task(self, symbol: str, current_price: float, current_iv: float, historical_ivs: list) -> Task:

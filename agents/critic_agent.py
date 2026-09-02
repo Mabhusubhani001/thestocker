@@ -15,7 +15,7 @@ class CriticAgent:
             ),
             verbose=True,
             allow_delegation=False,
-            llm=os.environ.get("MODEL_NAME", "gemini/gemini-3.5-flash")
+            llm=os.environ.get("MODEL_NAME", "openai/Qwen/Qwen2.5-7B-Instruct")
         )
 
     def evaluate_trade_task(self) -> Task:

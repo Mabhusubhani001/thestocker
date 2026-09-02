@@ -13,7 +13,8 @@ class LongStraddleStrategy(OptionsStrategy):
     """
     def construct_proposal(self) -> TradeProposal:
         client = AlpacaDataClient()
-        contracts = client.get_active_option_chain(self.symbol, self.current_price)
+        current_iv, _ = client.get_volatility_metrics(self.symbol, self.current_price)
+        contracts = client.get_active_option_chain(self.symbol, self.current_price, current_iv)
         
         target_delta = 0.50
         

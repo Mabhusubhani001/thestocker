@@ -1,0 +1,13 @@
+{
+    "source": "yfinance (Equity Bars), Options Pricing: MODELED (Black-Scholes off HV)",
+    "start_date": "2024-09-02",
+    "end_date": "2026-09-02",
+    "tickers": [
+        "SPY",
+        "QQQ"
+    ],
+    "total_rows": 1002,
+    "sha256_hash": "506f3defe02aa3b07d36704466640208bc88578b8e5892810dc54d67fa5a64a4",
+    "generated_at": "2026-09-02T01:39:01.613158",
+    "disclaimer": "Options data is MODELED using historical equity volatility. Alpaca historical options data was not used due to deep-history access restrictions."
+}

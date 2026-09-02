@@ -81,10 +81,15 @@ class PortfolioManager:
         try:
             positions = self.data_client.trading_client.get_all_positions()
             open_symbols = {p.symbol for p in positions}
+            
+            open_orders_data = self.data_client.get_open_orders()
+            open_order_symbols = {o["symbol"] for o in open_orders_data}
+            
             positions_fetched = True
         except Exception as e:
             logger.error(f"Error fetching positions for reconciliation: {e}")
             open_symbols = set()
+            open_order_symbols = set()
             
         for structure in structures:
             proposal_id = structure["proposal_id"]
@@ -95,20 +100,26 @@ class PortfolioManager:
             if not orders:
                 continue
                 
-            # If any orders are still 'new', the structure isn't fully filled yet. Wait.
-            if any(o["status"] == 'new' for o in orders):
-                continue
-
             contract_symbols = [o["contract_symbol"] for o in orders]
             
             # 2. Reconciliation Check:
-            # If the structure is active in our DB, but ANY of its contract symbols are missing from Alpaca's open positions,
-            # it means the user manually closed part or all of it on the UI. The AI should relinquish control.
-            if positions_fetched and any(sym not in open_symbols for sym in contract_symbols):
-                logger.info(f"Reconciliation: Structure {proposal_id} was manually modified by user. Relinquishing AI control.")
-                self.db.update_structure_status(proposal_id, 'closed')
-                for o in orders:
-                    self.db.update_order_fill(o["contract_symbol"], o["side"], o["qty"], 0.0, 'closed')
+            # If the structure is active in our DB, but ANY of its contract symbols are missing from Alpaca's open positions AND missing from open orders,
+            # it means the user manually closed part or all of it on the UI, OR the order was rejected/cancelled. The AI should relinquish control.
+            if positions_fetched:
+                missing_legs = 0
+                for sym in contract_symbols:
+                    if sym not in open_symbols and sym not in open_order_symbols:
+                        missing_legs += 1
+                        
+                if missing_legs > 0:
+                    logger.info(f"Reconciliation: Structure {proposal_id} is missing legs on Alpaca (manually closed/cancelled). Relinquishing AI control.")
+                    self.db.update_structure_status(proposal_id, 'closed')
+                    for o in orders:
+                        self.db.update_order_fill(o["contract_symbol"], o["side"], o["qty"], 0.0, 'closed')
+                    continue
+                    
+            # If any orders are still 'new' (but they DO exist on Alpaca as open orders), the structure isn't fully filled yet. Wait.
+            if any(o["status"] == 'new' for o in orders):
                 continue
                 
             # Gate 10: Active Liquidation

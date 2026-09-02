@@ -71,7 +71,7 @@ def run_autopsy(proposal_id: str):
         goal="Analyze closed options trades and generate insightful post-mortem reports explaining why they won or lost.",
         backstory="You are an expert options trader and quantitative researcher. Your job is to analyze the final P&L of a trade against recent news events, providing clear, actionable insights into what the market did and why the trade resulted in profit or loss.",
         verbose=True,
-        llm=os.environ.get("MODEL_NAME", "gemini/gemini-3.5-flash")
+        llm=os.environ.get("MODEL_NAME", "openai/Qwen/Qwen2.5-7B-Instruct")
     )
     
     autopsy_task = Task(

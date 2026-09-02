@@ -4,7 +4,7 @@ from typing import List, Tuple
 from datetime import datetime
 from agents.schemas import TradeProposal, OptionsLeg
 from data.alpaca_client import AlpacaDataClient
-from features.greeks import calculate_black_scholes
+from features.greeks import calculate_black_scholes, calculate_implied_volatility
 
 class OptionsStrategy(ABC):
     """
@@ -26,7 +26,7 @@ class OptionsStrategy(ABC):
         return f"PROPOSAL-{uuid.uuid4().hex[:8].upper()}"
         
     def generate_osi_symbol(self, expiration_date, option_type: str, strike: float) -> str:
-        """Generates a valid OSI symbol string matching ^[A-Z]{1,5}\d{6,7}[CP]\d{8}$"""
+        r"""Generates a valid OSI symbol string matching ^[A-Z]{1,5}\d{6,7}[CP]\d{8}$"""
         root = self.symbol.upper()
         exp_str = expiration_date.strftime("%y%m%d")
         opt_type = 'C' if option_type.lower() == 'call' else 'P'
@@ -46,14 +46,15 @@ class OptionsStrategy(ABC):
         net_credit = 0.0
         net_delta = 0.0
         
-        # Risk-free rate and assumed IV for Black-Scholes if not provided by exchange
+        # Risk-free rate and default IV fallback
         r = 0.05
-        sigma = 0.25 
+        fallback_sigma = 0.25 
         
         for i, leg in enumerate(legs):
             quote = live_quotes[i]
             ask = quote.get("ask", 0.0)
             bid = quote.get("bid", 0.0)
+            mid_price = (ask + bid) / 2.0
             
             # 1. Calculate Premium
             if leg.side == "buy":
@@ -67,12 +68,26 @@ class OptionsStrategy(ABC):
             days_to_expiry = (leg.expiration - datetime.utcnow().date()).days
             T = max(1, days_to_expiry) / 365.0
             
+            # Use Newton-Raphson to calculate exact IV for this specific leg
+            leg_iv = fallback_sigma
+            if mid_price > 0:
+                calc_iv = calculate_implied_volatility(
+                    target_price=mid_price,
+                    S=self.current_price,
+                    K=leg.strike,
+                    T=T,
+                    r=r,
+                    option_type=leg.option_type
+                )
+                if calc_iv > 0:
+                    leg_iv = calc_iv
+            
             greeks = calculate_black_scholes(
                 S=self.current_price,
                 K=leg.strike,
                 T=T,
                 r=r,
-                sigma=sigma,
+                sigma=leg_iv,
                 option_type=leg.option_type
             )
             

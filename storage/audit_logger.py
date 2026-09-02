@@ -83,6 +83,15 @@ class AuditLogger:
                     timestamp TEXT NOT NULL
                 )
             """)
+            
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS agent_thoughts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    agent_name TEXT NOT NULL,
+                    thought_text TEXT NOT NULL
+                )
+            """)
 
     def log_event(self, event_type: str, details: str):
         """Records an event to the immutable audit ledger."""
@@ -176,4 +185,20 @@ class AuditLogger:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("SELECT * FROM trade_autopsies")
+            return [dict(row) for row in cursor.fetchall()]
+
+    def log_thought(self, agent_name: str, thought_text: str):
+        """Records an internal agent thought for the dynamic UI."""
+        timestamp = datetime.utcnow().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT INTO agent_thoughts (timestamp, agent_name, thought_text) VALUES (?, ?, ?)",
+                (timestamp, agent_name, thought_text)
+            )
+            
+    def get_latest_thoughts(self, limit: int = 50):
+        """Retrieves the latest agent thoughts for the Chat UI."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute("SELECT * FROM agent_thoughts ORDER BY timestamp ASC LIMIT ?", (limit,))
             return [dict(row) for row in cursor.fetchall()]

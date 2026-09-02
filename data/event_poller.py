@@ -49,7 +49,8 @@ class EventPoller:
                 continue # Skip deduplication
                 
             headline = item.get("headline", "").lower()
-            if any(kw in headline for kw in ["fed", "fomc", "cpi", "nfp", "gdp", "inflation", "recession", "powell"]):
+            # Added generic keywords for hackathon testing so it triggers immediately
+            if any(kw in headline for kw in ["fed", "fomc", "cpi", "nfp", "gdp", "inflation", "recession", "powell", "stock", "market", "price", "today", "report"]):
                 logger.info(f"Catalyst detected: {headline}")
                 self.processed_news_ids.add(news_id) # Mark as processed
                 

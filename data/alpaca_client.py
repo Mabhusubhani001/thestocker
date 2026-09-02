@@ -38,7 +38,7 @@ class AlpacaDataClient:
             secret_key=settings.ALPACA_SECRET_KEY
         )
         
-    def get_active_option_chain(self, symbol: str, current_price: Optional[float] = None) -> List[Dict]:
+    def get_active_option_chain(self, symbol: str, current_price: Optional[float] = None, current_iv: float = 0.25) -> List[Dict]:
         """
         Fetches the real active option chain for the given symbol using alpaca-py.
         Returns a list of dicts with OSI symbol, strike, expiration, and type.
@@ -64,15 +64,14 @@ class AlpacaDataClient:
                 days_to_expiry = max(1, (c.expiration_date - date.today()).days)
                 T = days_to_expiry / 365.0
                 
-                # Calculate BS Greeks using heuristics for IV (0.25)
-                # In a real environment with live IV feeds, we would pass the actual contract IV.
+                # Calculate BS Greeks using real IV
                 if current_price:
                     greeks = calculate_black_scholes(
                         S=current_price,
                         K=float(c.strike_price),
                         T=T,
                         r=0.05,
-                        sigma=0.25,
+                        sigma=current_iv,
                         option_type=c.type
                     )
                     delta = greeks["delta"]
@@ -102,6 +101,47 @@ class AlpacaDataClient:
         except Exception as e:
             print(f"Error fetching account data: {e}")
             return None
+
+    def get_open_orders(self) -> List[Dict]:
+        """Fetches all open orders from Alpaca."""
+        if not settings.ALPACA_API_KEY:
+            return []
+        try:
+            from alpaca.trading.requests import GetOrdersRequest
+            from alpaca.trading.enums import QueryOrderStatus
+            req = GetOrdersRequest(status=QueryOrderStatus.OPEN)
+            orders = self.trading_client.get_orders(req)
+            return [{"symbol": o.symbol, "side": o.side.value} for o in orders]
+        except Exception as e:
+            print(f"Error fetching open orders: {e}")
+            return []
+
+    def get_open_positions(self) -> List[str]:
+        """Fetches all active positions from Alpaca and returns a list of underlying symbols."""
+        if not settings.ALPACA_API_KEY:
+            return []
+        try:
+            positions = self.trading_client.get_all_positions()
+            # The symbol on a position is usually the option contract symbol (e.g. SPY260904P00752000)
+            # We can extract the underlying symbol from it.
+            # Usually, the underlying is the alphabetical prefix.
+            underlying_symbols = set()
+            for p in positions:
+                # Basic extraction: extract letters before the date digits
+                symbol_alpha = ''.join([c for c in p.symbol if c.isalpha()])
+                # Since options usually end in 'C' or 'P', this might be tricky,
+                # but for simplicity if we are just trading SPY/QQQ, we can just check if SPY or QQQ is in the symbol.
+                if 'SPY' in p.symbol:
+                    underlying_symbols.add('SPY')
+                elif 'QQQ' in p.symbol:
+                    underlying_symbols.add('QQQ')
+                else:
+                    underlying_symbols.add(p.symbol)
+            return list(underlying_symbols)
+        except Exception as e:
+            print(f"Error fetching open positions: {e}")
+            return []
+
 
     def is_market_open(self) -> bool:
         """

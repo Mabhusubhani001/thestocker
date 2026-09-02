@@ -84,17 +84,28 @@ class ThetaSwarmRunner:
         task3 = critic.evaluate_trade_task()
         task3.context = [task1, task2] # Critic reviews both
         
+        def swarm_step_callback(*args, **kwargs):
+            try:
+                step = args[0] if args else str(kwargs)
+                step_text = str(step)
+                if len(step_text) > 10:
+                    self.audit_logger.log_thought("Swarm Agent", step_text)
+            except Exception:
+                pass
+
         # 3. Assemble Crew
         crew = Crew(
             agents=[narrative.agent, quant.agent, critic.agent],
             tasks=[task1, task2, task3],
             process=Process.sequential,
-            verbose=True
+            verbose=True,
+            step_callback=swarm_step_callback
         )
         
         # 4. Execute Swarm
         try:
             logger.info("Starting CrewAI Swarm...")
+            self.audit_logger.log_thought("System", f"🚨 Catalyst Detected! Waking up the Swarm to analyze: {actual_news}")
             # Note: This will fail if OPENAI_API_KEY is not in the .env file
             result = await crew.kickoff_async()
             
@@ -117,8 +128,8 @@ class ThetaSwarmRunner:
                     live_leg_data = alpaca_client.get_option_snapshot(contract_symbols)
                     
                     # Fetch live active positions so Risk Manager can apply Gate 6 (Max 1 structure per ticker)
-                    active_structs = self.audit_logger.get_active_structures()
-                    self.risk_manager.active_positions = [s["symbol"] for s in active_structs]
+                    active_positions = alpaca_client.get_open_positions()
+                    self.risk_manager.active_positions = active_positions
                     
                     risk_decision = self.risk_manager.evaluate_proposal(quant_output, live_leg_data)
                     
